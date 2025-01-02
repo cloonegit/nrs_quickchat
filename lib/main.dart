@@ -1,5 +1,6 @@
 import 'dart:io';
 
+import 'package:NRS_Quickchat/provider/staffaccess_provider.dart';
 import 'package:flutter/material.dart';
 import 'package:NRS_Quickchat/global_function/app_debug.dart';
 import 'package:NRS_Quickchat/screens/home.dart';
@@ -8,11 +9,14 @@ import 'package:NRS_Quickchat/screens/login.dart';
 import 'package:NRS_Quickchat/screens/listpage.dart';
 import 'package:NRS_Quickchat/screens/splash.dart';
 import 'package:NRS_Quickchat/services/getsharedpreferences.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:onesignal_flutter/onesignal_flutter.dart';
 import 'package:responsive_sizer/responsive_sizer.dart';
 import 'package:NRS_Quickchat/services/getit.dart' as getItSetup;
 
 final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
+final staffaccessProvider =
+    ChangeNotifierProvider((ref) => StaffaccessProvider());
 
 void checkPlatform() {
   if (Platform.isAndroid) {
@@ -29,10 +33,10 @@ void checkPlatform() {
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
-  const initialRoute = '/splash';
+  const initialRoute = '/home';
   getItSetup.setup();
 
-  runApp(const MyApp(initialRoute: initialRoute));
+  runApp(ProviderScope(child: const MyApp(initialRoute: initialRoute)));
   // oneSignal();
 }
 

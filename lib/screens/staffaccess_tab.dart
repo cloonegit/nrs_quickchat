@@ -1,43 +1,49 @@
+import 'package:NRS_Quickchat/main.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_advanced_switch/flutter_advanced_switch.dart';
 import 'package:NRS_Quickchat/global_function/app_debug.dart';
 import 'package:NRS_Quickchat/widget/custom_modal.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:responsive_sizer/responsive_sizer.dart';
 
-class StaffAccessTab extends StatefulWidget {
+class StaffAccessTab extends ConsumerStatefulWidget {
   const StaffAccessTab({super.key});
 
   @override
-  State<StaffAccessTab> createState() => _StaffAccessTabState();
+  ConsumerState<StaffAccessTab> createState() => _StaffAccessTabState();
 }
 
-class _StaffAccessTabState extends State<StaffAccessTab> {
+class _StaffAccessTabState extends ConsumerState<StaffAccessTab>
+// with AutomaticKeepAliveClientMixin
+{
+  @override
+  // bool get wantKeepAlive => true;
   bool selectedValue = false;
-  List<ValueNotifier<bool>> controllers = [];
-  List staffData = [
-    {'staffcode': 'SH10334 (83)', 'staffname': 'SOH SEH YEE'},
-    {'staffcode': 'SH10567 (29)', 'staffname': 'LEE CHONG WEI'},
-    {'staffcode': 'SH10789 (56)', 'staffname': 'TAN BOON HEONG'},
-    {'staffcode': 'SH10921 (12)', 'staffname': 'WONG MEW CHOO'},
-    {'staffcode': 'SH11034 (47)', 'staffname': 'CHONG WEI LING'},
-    {'staffcode': 'SH11245 (38)', 'staffname': 'LIM CHONG YEW'},
-    {'staffcode': 'SH11367 (44)', 'staffname': 'GOH LIU YING'},
-    {'staffcode': 'SH11589 (23)', 'staffname': 'TAN KAH YING'},
-    {'staffcode': 'SH11801 (52)', 'staffname': 'NG HUI LIN'},
-    {'staffcode': 'SH12023 (19)', 'staffname': 'CHAN PENG SOON'},
-    {'staffcode': 'SH12234 (61)', 'staffname': 'LEE SIN YEE'},
-    {'staffcode': 'SH12456 (33)', 'staffname': 'HOH KOK HOI'},
-  ];
+  List staffData = [];
   TextEditingController searchController = TextEditingController();
   List filteredStaffData = [];
+  bool isLoading = true;
 
   @override
   void initState() {
     super.initState();
-    controllers =
-        List.generate(staffData.length, (index) => ValueNotifier<bool>(false));
-    filteredStaffData = staffData;
+    fetchData();
     searchController.addListener(_filterStaff);
+  }
+
+  fetchData() {
+    Future.microtask(() async {
+      setState(() {
+        isLoading = true;
+      });
+      await ref.read(staffaccessProvider).fetchStaffData();
+      staffData = ref.read(staffaccessProvider).getStaffData;
+      filteredStaffData = staffData;
+      AppDebug().printDebug(msg: 'staffData in fetchdata:$filteredStaffData');
+      setState(() {
+        isLoading = false;
+      });
+    });
   }
 
   @override
@@ -49,20 +55,30 @@ class _StaffAccessTabState extends State<StaffAccessTab> {
     super.dispose();
   }
 
-  void _filterStaff() {
-    setState(() {
-      filteredStaffData = staffData.where((staff) {
-        String staffcode = staff['staffcode'].toLowerCase();
-        String staffname = staff['staffname'].toLowerCase();
-        String query = searchController.text.toLowerCase();
-        return staffcode.contains(query) || staffname.contains(query);
-      }).toList();
-    });
+  Future<void> _refreshData() async {
+    try {
+      fetchData();
+      AppDebug().printDebug(msg: 'Data Refresh Successful');
+    } catch (e) {
+      AppDebug().printDebug(msg: 'Error during data refresh: $e');
+    }
+  }
+
+  Future<void> _filterStaff() async {
+    String query = searchController.text.toLowerCase();
+    filteredStaffData = staffData
+        .where((staff) =>
+            staff['staffcode'].toLowerCase().contains(query) ||
+            staff['staffname'].toLowerCase().contains(query))
+        .toList();
+    AppDebug()
+        .printDebug(msg: 'filtered list after click yes:$filteredStaffData');
+    // await ref.read(staffaccessProvider).setStaffData(filteredStaffData);
   }
 
   assignStaff(int index, bool value, String staffcode) {
-    String? assign;
-    value ? assign = 'Enable' : assign = 'Disable';
+    String assign = value ? 'Enable' : 'Disable';
+
     showDialog<String>(
         barrierDismissible: false,
         context: context,
@@ -71,29 +87,34 @@ class _StaffAccessTabState extends State<StaffAccessTab> {
             canPop: false,
             child: CustomModal(
               isCloseButton: true,
-              onClose: () {
-                controllers[index].value = !value;
-                Navigator.pop(context);
-              },
+              onClose: () {},
               title: '$assign Staff',
               subtitle: '$assign this staff $staffcode to access?',
               button: 'YES',
               button2: 'NO',
-              onNext: () {
-                setState(() {
-                  controllers[index].value = value;
-                });
+              onNext: () async {
+                await toggleStaffSelection(index);
               },
-              onCancel: () {
-                controllers[index].value = !value;
-                Navigator.pop(context);
-              },
+              onCancel: () {},
             ),
           );
         });
   }
 
-  Widget staffContainer(int index, String staffcode, String staffname) {
+  Future<void> toggleStaffSelection(int index) async {
+    setState(() {
+      isLoading = true;
+    });
+    staffData[index]['selected'] = !staffData[index]['selected'];
+    staffData.sort((a, b) => (b['selected'] ? 1 : 0) - (a['selected'] ? 1 : 0));
+    await _filterStaff();
+    setState(() {
+      isLoading = false;
+    });
+  }
+
+  Widget staffContainer(
+      int index, String staffcode, String staffname, bool isSelected) {
     return Container(
       margin: EdgeInsets.symmetric(
         horizontal: Adaptive.w(3),
@@ -123,12 +144,13 @@ class _StaffAccessTabState extends State<StaffAccessTab> {
           ),
           Column(
             children: [
-              AdvancedSwitch(
-                controller: controllers[index],
-                width: 40.0,
-                height: 20.0,
-                activeColor: Colors.red,
-                initialValue: controllers[index].value,
+              Switch(
+                value: isSelected,
+                // controller: ValueNotifier<bool>(isSelected),
+                // width: 40.0,
+                // height: 20.0,
+                activeTrackColor: Colors.red,
+                inactiveTrackColor: Colors.white,
                 onChanged: (value) {
                   assignStaff(index, value, staffcode);
                 },
@@ -142,81 +164,105 @@ class _StaffAccessTabState extends State<StaffAccessTab> {
 
   @override
   Widget build(BuildContext context) {
-    return SafeArea(
-      child: Container(
-        color: Colors.grey[100],
-        child: Column(
-          children: [
-            Padding(
-              padding: EdgeInsets.only(
-                top: Adaptive.h(2),
-              ),
-              child: Center(
-                child: Text(
-                  'AutoReply (-) ${DateTime.now()}',
-                  style: const TextStyle(
-                      fontFamily: 'Poppins', color: Colors.grey, fontSize: 12),
-                ),
-              ),
-            ),
-            Container(
-              margin: EdgeInsets.all(15),
-              padding: EdgeInsets.only(
-                left: Adaptive.w(3),
-                right: Adaptive.w(3),
-                top: Adaptive.h(0),
-              ),
-              height: Adaptive.h(6),
-              width: Adaptive.w(90),
-              decoration: BoxDecoration(
-                  color: Colors.white,
-                  borderRadius: BorderRadius.circular(25),
-                  border: Border.all(color: Colors.grey)),
-              child: Row(
+    // super.build(context);
+    final staffAccessProvider = ref.watch(staffaccessProvider);
+
+    AppDebug().printDebug(msg: 'build 123');
+    return isLoading || staffAccessProvider.isFetching
+        ? const CircularProgressIndicator.adaptive(
+            strokeWidth: 5,
+            strokeAlign: CircularProgressIndicator.strokeAlignCenter,
+            valueColor: AlwaysStoppedAnimation<Color>(Color(0xFFED1C24)),
+          )
+        : SafeArea(
+            child: Container(
+              color: Colors.grey[100],
+              child: Column(
                 children: [
-                  const Icon(
-                    Icons.search_sharp,
-                    color: Colors.grey,
+                  Padding(
+                    padding: EdgeInsets.only(
+                      top: Adaptive.h(2),
+                    ),
+                    child: Center(
+                      child: Text(
+                        'AutoReply (-) ${DateTime.now()}',
+                        style: const TextStyle(
+                            fontFamily: 'Poppins',
+                            color: Colors.grey,
+                            fontSize: 12),
+                      ),
+                    ),
+                  ),
+                  Container(
+                    margin: EdgeInsets.all(15),
+                    padding: EdgeInsets.only(
+                      left: Adaptive.w(3),
+                      right: Adaptive.w(3),
+                      top: Adaptive.h(0),
+                    ),
+                    height: Adaptive.h(6),
+                    width: Adaptive.w(90),
+                    decoration: BoxDecoration(
+                        color: Colors.white,
+                        borderRadius: BorderRadius.circular(25),
+                        border: Border.all(color: Colors.grey)),
+                    child: Row(
+                      children: [
+                        const Icon(
+                          Icons.search_sharp,
+                          color: Colors.grey,
+                        ),
+                        Expanded(
+                          child: TextField(
+                            onTapOutside: (event) {
+                              FocusScope.of(context).unfocus();
+                            },
+                            controller: searchController,
+                            enableInteractiveSelection: false,
+                            cursorColor: Colors.red,
+                            decoration: const InputDecoration(
+                                contentPadding:
+                                    EdgeInsets.symmetric(horizontal: 5),
+                                focusedBorder: OutlineInputBorder(
+                                    borderSide: BorderSide.none),
+                                enabledBorder: OutlineInputBorder(
+                                    borderSide: BorderSide.none),
+                                hintStyle: TextStyle(
+                                    fontFamily: 'Poppins', color: Colors.grey),
+                                hintText: 'Search'),
+                            style: const TextStyle(
+                                fontFamily: 'Poppins', fontSize: 14),
+                          ),
+                        )
+                      ],
+                    ),
                   ),
                   Expanded(
-                    child: TextField(
-                      onTapOutside: (event) {
-                        FocusScope.of(context).unfocus();
-                      },
-                      controller: searchController,
-                      enableInteractiveSelection: false,
-                      cursorColor: Colors.red,
-                      decoration: const InputDecoration(
-                          contentPadding: EdgeInsets.symmetric(horizontal: 5),
-                          focusedBorder:
-                              OutlineInputBorder(borderSide: BorderSide.none),
-                          enabledBorder:
-                              OutlineInputBorder(borderSide: BorderSide.none),
-                          hintStyle: TextStyle(
-                              fontFamily: 'Poppins', color: Colors.grey),
-                          hintText: 'Search'),
-                      style:
-                          const TextStyle(fontFamily: 'Poppins', fontSize: 14),
+                    child: RefreshIndicator(
+                      color: Color(0xFFED1C24),
+                      backgroundColor: Colors.white,
+                      onRefresh: _refreshData,
+                      child: ListView.builder(
+                          itemCount: filteredStaffData.length,
+                          itemBuilder: (context, index) {
+                            String staffcode =
+                                filteredStaffData[index]['staffcode'];
+                            String staffname =
+                                filteredStaffData[index]['staffname'];
+                            bool isSelected =
+                                filteredStaffData[index]['selected'];
+
+                            return Padding(
+                              padding: const EdgeInsets.all(8.0),
+                              child: staffContainer(
+                                  index, staffcode, staffname, isSelected),
+                            );
+                          }),
                     ),
                   )
                 ],
               ),
             ),
-            Expanded(
-              child: ListView.builder(
-                  itemCount: filteredStaffData.length,
-                  itemBuilder: (context, index) {
-                    String staffcode = filteredStaffData[index]['staffcode'];
-                    String staffname = filteredStaffData[index]['staffname'];
-                    return Padding(
-                      padding: const EdgeInsets.all(8.0),
-                      child: staffContainer(index, staffcode, staffname),
-                    );
-                  }),
-            )
-          ],
-        ),
-      ),
-    );
+          );
   }
 }
